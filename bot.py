@@ -57,7 +57,7 @@ CANCEL_KB = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=BTN_CANCEL)]], re
 
 HELP = """<b>Test boti</b>
 
-Bu bot QuizBot kabi ishlaydi, faqat savollarni bittalab kiritish shart emas: hamma savollarni bitta Excel yoki Word faylda yuborasiz.
+Savollarni bittalab kiritish shart emas: hamma savollarni bitta Excel yoki Word faylda yuborasiz.
 
 <b>Test yaratish</b>
 1. Pastdagi «➕ Yangi test» tugmasini bosing va test nomini yozing.

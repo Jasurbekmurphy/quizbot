@@ -1,6 +1,6 @@
 # Test (quiz) boti
 
-QuizBot kabi ishlaydi, lekin savollar bittalab emas, bitta Excel yoki Word fayldan birdaniga yuklanadi.
+Paxtaobod tumani 2-son texnikumi uchun test boti. Savollar bitta Excel, Word yoki .txt fayldan birdaniga yuklanadi.
 
 ## Imkoniyatlar
 - Excel (.xlsx), Word (.docx) yoki .txt fayldan testni bir yo'la yuklash. Namuna: `/shablon`.
