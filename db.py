@@ -39,6 +39,9 @@ conn.executescript(
     """
 )
 conn.execute("PRAGMA foreign_keys = ON")
+# Har savolga alohida vaqt (NULL bo'lsa testning umumiy vaqti ishlatiladi)
+if "time_limit" not in [r["name"] for r in conn.execute("PRAGMA table_info(questions)")]:
+    conn.execute("ALTER TABLE questions ADD COLUMN time_limit INTEGER")
 conn.commit()
 
 
@@ -46,9 +49,9 @@ def create_quiz(owner_id, title, questions, time_limit=30):
     cur = conn.execute("INSERT INTO quizzes(owner_id, title, time_limit) VALUES (?,?,?)", (owner_id, title, time_limit))
     quiz_id = cur.lastrowid
     conn.executemany(
-        "INSERT INTO questions(quiz_id, pos, text, options, correct, explanation) VALUES (?,?,?,?,?,?)",
-        [(quiz_id, i, q["text"], json.dumps(q["options"], ensure_ascii=False), q["correct"], q.get("explanation", ""))
-         for i, q in enumerate(questions)],
+        "INSERT INTO questions(quiz_id, pos, text, options, correct, explanation, time_limit) VALUES (?,?,?,?,?,?,?)",
+        [(quiz_id, i, q["text"], json.dumps(q["options"], ensure_ascii=False), q["correct"], q.get("explanation", ""),
+          q.get("time_limit")) for i, q in enumerate(questions)],
     )
     conn.commit()
     return quiz_id
@@ -77,10 +80,30 @@ def user_quizzes(owner_id):
     ))
 
 
+def _question(r):
+    return dict(id=r["id"], quiz_id=r["quiz_id"], pos=r["pos"], text=r["text"], options=json.loads(r["options"]),
+                correct=r["correct"], explanation=r["explanation"], time_limit=r["time_limit"])
+
+
 def quiz_questions(quiz_id):
-    rows = conn.execute("SELECT * FROM questions WHERE quiz_id=? ORDER BY pos", (quiz_id,))
-    return [dict(text=r["text"], options=json.loads(r["options"]), correct=r["correct"], explanation=r["explanation"])
-            for r in rows]
+    return [_question(r) for r in conn.execute("SELECT * FROM questions WHERE quiz_id=? ORDER BY pos", (quiz_id,))]
+
+
+def get_question(question_id):
+    r = conn.execute("SELECT * FROM questions WHERE id=?", (question_id,)).fetchone()
+    return _question(r) if r else None
+
+
+def set_question_time(question_id, seconds):
+    conn.execute("UPDATE questions SET time_limit=? WHERE id=?", (seconds, question_id))
+    conn.commit()
+
+
+def set_all_times(quiz_id, seconds):
+    """Hamma savollarga bir xil vaqt: alohida qo'yilgan vaqtlar o'chiriladi."""
+    conn.execute("UPDATE quizzes SET time_limit=? WHERE id=?", (seconds, quiz_id))
+    conn.execute("UPDATE questions SET time_limit=NULL WHERE quiz_id=?", (quiz_id,))
+    conn.commit()
 
 
 def question_count(quiz_id):
