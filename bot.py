@@ -60,18 +60,16 @@ HELP = """<b>Test boti</b>
 Bu bot QuizBot kabi ishlaydi, faqat savollarni bittalab kiritish shart emas: hamma savollarni bitta Excel yoki Word faylda yuborasiz.
 
 <b>Test yaratish</b>
-1. «➕ Yangi test» ni bosing va test nomini yozing.
-2. Savollar faylini yuboring (Excel .xlsx, Word .docx yoki .txt). Namunasi: «📄 Shablonlar».
+1. Pastdagi «➕ Yangi test» tugmasini bosing va test nomini yozing.
+2. Savollar faylini yuboring (Excel, Word yoki .txt). Namunasi: «📄 Shablonlar» tugmasida.
 3. Har savolga vaqtni va aralashtirishni tanlang. Tayyor!
 
-<b>Testni o'tkazish</b>
+<b>Testni o'tkazish</b> («📚 Testlarim» → test)
 • «▶️ Boshlash» — o'zingiz shu yerda yechasiz.
 • «👥 Guruhda boshlash» — guruhni tanlaysiz, u yerda «▶️ Boshlash» bosilganda test boshlanadi va oxirida reyting chiqadi.
 • «📤 Ulashish» — havolani boshqalarga yuborasiz, ular testni botda yechadi.
 
-/stop — ketayotgan testni to'xtatish
-/testlarim — testlaringiz ro'yxati
-/shablon — namuna fayllar"""
+Ketayotgan testni «⏹ To'xtatish» tugmasi bilan to'xtatasiz."""
 
 
 def can_create(user_id: int) -> bool:
@@ -148,13 +146,15 @@ async def start_deep(message: Message, command: CommandObject, state: FSMContext
         quiz = db.get_quiz(quiz_id)
         if quiz["owner_id"] != message.from_user.id:
             text, kb = await quiz_card(bot, quiz_id, for_group=True)
+    if not group:
+        await message.answer("👋 Salom!", reply_markup=MAIN_KB)  # pastki menyu tugmalari
     await message.answer(text, reply_markup=kb)
 
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     if message.chat.type != "private":
-        await message.answer("Salom! Testni guruhda boshlash uchun botning shaxsiy chatida testni oching va «👥 Guruhda boshlash» ni bosing.")
+        await message.answer("Salom! Testni guruhda boshlash uchun botning shaxsiy chatida «📚 Testlarim» dan testni oching va «👥 Guruhda boshlash» ni bosing.")
         return
     await state.clear()
     if can_create(message.from_user.id):
@@ -221,7 +221,7 @@ async def new_title(message: Message, state: FSMContext):
     await state.set_state(NewQuiz.file)
     await message.answer(
         "📎 Endi savollar faylini yuboring: Excel (.xlsx), Word (.docx) yoki .txt.\n"
-        "Namuna fayllar: «📄 Shablonlar»."
+        "Namuna fayllar: «📄 Shablonlar» tugmasida."
     )
 
 
@@ -236,13 +236,13 @@ async def on_file(message: Message, state: FSMContext, bot: Bot):
         questions, errors = parse_file(filename, data)
     except Exception:
         log.exception("Faylni o'qib bo'lmadi")
-        await message.answer("❌ Faylni o'qib bo'lmadi. U buzilmaganini tekshiring yoki shablon bo'yicha tayyorlang (/shablon).")
+        await message.answer("❌ Faylni o'qib bo'lmadi. U buzilmaganini tekshiring yoki «📄 Shablonlar» dagi namuna bo'yicha tayyorlang.")
         return
     if not questions:
         text = "❌ Faylda birorta ham to'g'ri tuzilgan savol topilmadi."
         if errors:
             text += "\n\n" + "\n".join(escape(e) for e in errors[:15])
-        await message.answer(text + "\n\nNamuna: /shablon")
+        await message.answer(text + "\n\nNamuna fayllar: «📄 Shablonlar» tugmasida.")
         return
     title = (await state.get_data()).get("title") or filename.rsplit(".", 1)[0][:120]
     await state.set_state(NewQuiz.timing)
@@ -301,7 +301,7 @@ def owned(call: CallbackQuery, quiz_id: int):
 async def cmd_my(message: Message):
     quizzes = db.user_quizzes(message.from_user.id)
     if not quizzes:
-        await message.answer("Sizda hali test yo'q. «➕ Yangi test» ni bosing.")
+        await message.answer("Sizda hali test yo'q. Pastdagi «➕ Yangi test» ni bosing.", reply_markup=MAIN_KB)
         return
     buttons = [
         [InlineKeyboardButton(text=f"📝 {q['title'][:40]} ({q['n']})", callback_data=f"card:{q['id']}")]
@@ -476,8 +476,11 @@ async def run_quiz(bot: Bot, run: Run):
             f"🏁 <b>«{escape(run.quiz['title'])}»</b> testi boshlanmoqda!\n\n"
             f"🖊 {n} ta savol, har biriga ⏱ {fmt_limit(run.quiz['time_limit'])}.\n"
             + ("Kim ko'p to'g'ri va tez javob bersa, o'sha g'olib! " if run.is_group else "")
-            + "To'xtatish: /stop\n\nTayyorlaning...",
+            + "\nTayyorlaning...",
             message_thread_id=run.thread_id,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="⏹ To'xtatish", callback_data="stop"),
+            ]]),
         )
         await asyncio.sleep(COUNTDOWN)
         idle = 0
@@ -565,7 +568,7 @@ async def start_run(call: CallbackQuery, bot: Bot):
     thread_id = msg.message_thread_id if msg.is_topic_message else None
     key = (msg.chat.id, thread_id)
     if key in runs:
-        await call.answer("Bu yerda test allaqachon ketyapti. To'xtatish: /stop", show_alert=True)
+        await call.answer("Bu yerda test allaqachon ketyapti. Avval uni «⏹ To'xtatish» bilan to'xtating.", show_alert=True)
         return
     questions = prepare_questions(quiz)
     if not questions:
@@ -603,36 +606,48 @@ async def on_answer(answer: PollAnswer):
         run.answer_event.set()
 
 
+async def try_stop(bot: Bot, chat_id: int, chat_type: str, thread_id, user_id: int) -> str:
+    run = runs.get((chat_id, thread_id))
+    if not run:
+        return "Hozir ketayotgan test yo'q."
+    allowed = user_id in (run.starter_id, run.quiz["owner_id"])
+    if not allowed and run.is_group:
+        member = await bot.get_chat_member(chat_id, user_id)
+        allowed = member.status in ("creator", "administrator")
+    if not allowed:
+        return "Testni faqat uni boshlagan odam yoki guruh admini to'xtata oladi."
+    run.stopped = True
+    run.answer_event.set()
+    return ""
+
+
 @dp.message(Command("stop"))
 async def cmd_stop(message: Message, bot: Bot):
     thread_id = message.message_thread_id if message.is_topic_message else None
-    run = runs.get((message.chat.id, thread_id))
-    if not run:
-        await message.answer("Hozir ketayotgan test yo'q.")
+    err = await try_stop(bot, message.chat.id, message.chat.type, thread_id, message.from_user.id)
+    await message.answer(err or "⏹ Test to'xtatildi. Natijalar chiqarilmoqda...")
+
+
+@dp.callback_query(F.data == "stop")
+async def stop_button(call: CallbackQuery, bot: Bot):
+    msg = call.message
+    thread_id = msg.message_thread_id if msg.is_topic_message else None
+    err = await try_stop(bot, msg.chat.id, msg.chat.type, thread_id, call.from_user.id)
+    if err:
+        await call.answer(err, show_alert=True)
         return
-    allowed = message.from_user.id in (run.starter_id, run.quiz["owner_id"])
-    if not allowed and run.is_group:
-        member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-        allowed = member.status in ("creator", "administrator")
-    if not allowed:
-        await message.answer("Testni faqat uni boshlagan odam yoki guruh admini to'xtata oladi.")
-        return
-    run.stopped = True
-    run.answer_event.set()
-    await message.answer("⏹ Test to'xtatildi. Natijalar chiqarilmoqda...")
+    await call.answer("To'xtatildi")
+    try:
+        await msg.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await msg.answer("⏹ Test to'xtatildi. Natijalar chiqarilmoqda...")
 
 
 # ---------- Ishga tushirish ----------
 
-PRIVATE_COMMANDS = [
-    BotCommand(command="start", description="Bosh menyu"),
-    BotCommand(command="yangi", description="Yangi test yaratish"),
-    BotCommand(command="testlarim", description="Mening testlarim"),
-    BotCommand(command="shablon", description="Excel va Word shablon"),
-    BotCommand(command="stop", description="Testni to'xtatish"),
-    BotCommand(command="help", description="Yordam"),
-]
-GROUP_COMMANDS = [BotCommand(command="stop", description="Testni to'xtatish")]
+# Hamma narsa tugmalar orqali: «Menu» da faqat /start qoladi
+PRIVATE_COMMANDS = [BotCommand(command="start", description="Bosh menyu")]
 
 
 async def main():
@@ -641,7 +656,7 @@ async def main():
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     try:
         await bot.set_my_commands(PRIVATE_COMMANDS, scope=BotCommandScopeAllPrivateChats())
-        await bot.set_my_commands(GROUP_COMMANDS, scope=BotCommandScopeAllGroupChats())
+        await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
     except Exception:
         log.exception("Menyu buyruqlarini o'rnatib bo'lmadi")
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
