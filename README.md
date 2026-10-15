@@ -9,6 +9,7 @@ Paxtaobod tumani 2-son texnikumi uchun test boti. Savollar bitta Excel, Word yok
 - Savollar va javoblarni har safar aralashtirish (yoqish/o'chirish mumkin).
 - Testni shaxsiy chatda yechish yoki guruhda o'tkazish: guruhda oxirida reyting (to'g'ri javoblar soni, keyin tezlik).
 - Havola orqali ulashish, guruh mavzulari (topic) ichida ham ishlaydi.
+- «📊 Statistika» (faqat `.env` dagi `OWNER_IDS` uchun): foydalanuvchilar soni (24 soat / 7 / 30 kun), testlar, yechishlar, guruhlar.
 - «⏹ To'xtatish» tugmasi — testni to'xtatish (boshlagan odam, test egasi yoki guruh admini).
 
 ## Fayl ko'rinishlari

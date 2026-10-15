@@ -39,6 +39,27 @@ conn.executescript(
     """
 )
 conn.execute("PRAGMA foreign_keys = ON")
+conn.executescript(
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '',
+        username TEXT NOT NULL DEFAULT '',
+        first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS chats (
+        chat_id INTEGER PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '',
+        type TEXT NOT NULL,
+        first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    -- statistika qo'shilishidan oldingi foydalanuvchilar: test egalari va test yechganlar
+    INSERT OR IGNORE INTO users(user_id, first_seen, last_seen) SELECT owner_id, MIN(created_at), MAX(created_at) FROM quizzes GROUP BY owner_id;
+    INSERT OR IGNORE INTO users(user_id, name, first_seen, last_seen) SELECT user_id, name, MIN(created_at), MAX(created_at) FROM results GROUP BY user_id;
+    """
+)
 # Har savolga alohida vaqt (NULL bo'lsa testning umumiy vaqti ishlatiladi)
 if "time_limit" not in [r["name"] for r in conn.execute("PRAGMA table_info(questions)")]:
     conn.execute("ALTER TABLE questions ADD COLUMN time_limit INTEGER")
@@ -120,3 +141,44 @@ def save_result(quiz_id, user_id, name, correct, total, seconds, chat_type):
 
 def result_count(quiz_id):
     return conn.execute("SELECT COUNT(DISTINCT user_id) FROM results WHERE quiz_id=?", (quiz_id,)).fetchone()[0]
+
+
+# ---------- Statistika ----------
+
+def touch_user(user_id, name, username):
+    conn.execute(
+        "INSERT INTO users(user_id, name, username) VALUES (?,?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET name=excluded.name, username=excluded.username, last_seen=CURRENT_TIMESTAMP",
+        (user_id, name, username or ""),
+    )
+    conn.commit()
+
+
+def touch_chat(chat_id, title, chat_type):
+    conn.execute(
+        "INSERT INTO chats(chat_id, title, type) VALUES (?,?,?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET title=excluded.title, last_seen=CURRENT_TIMESTAMP",
+        (chat_id, title or "", chat_type),
+    )
+    conn.commit()
+
+
+def stats():
+    one = lambda sql: conn.execute(sql).fetchone()[0]
+    return dict(
+        users=one("SELECT COUNT(*) FROM users"),
+        today=one("SELECT COUNT(*) FROM users WHERE last_seen >= datetime('now', '-1 day')"),
+        week=one("SELECT COUNT(*) FROM users WHERE last_seen >= datetime('now', '-7 days')"),
+        month=one("SELECT COUNT(*) FROM users WHERE last_seen >= datetime('now', '-30 days')"),
+        new_week=one("SELECT COUNT(*) FROM users WHERE first_seen >= datetime('now', '-7 days')"),
+        creators=one("SELECT COUNT(DISTINCT owner_id) FROM quizzes"),
+        quizzes=one("SELECT COUNT(*) FROM quizzes"),
+        questions=one("SELECT COUNT(*) FROM questions"),
+        solved=one("SELECT COUNT(*) FROM results"),
+        solvers=one("SELECT COUNT(DISTINCT user_id) FROM results"),
+        groups=one("SELECT COUNT(*) FROM chats WHERE type IN ('group', 'supergroup')"),
+        top=list(conn.execute(
+            "SELECT q.title, COUNT(r.id) AS n FROM results r JOIN quizzes q ON q.id = r.quiz_id "
+            "GROUP BY r.quiz_id ORDER BY n DESC LIMIT 5"
+        )),
+    )

@@ -30,13 +30,27 @@ from aiogram.types import (
 )
 
 import db
-from config import ADMIN_IDS, BOT_TOKEN
+from config import ADMIN_IDS, BOT_TOKEN, OWNER_IDS
 from importer import MAX_OPTIONS, make_docx_template, make_xlsx_template, parse_file
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("quiz")
 
 dp = Dispatcher()
+
+
+@dp.update.outer_middleware()
+async def remember_users(handler, event, data):
+    """Statistika uchun: kim va qaysi guruh botdan foydalanganini yozib boradi."""
+    try:
+        user, chat = data.get("event_from_user"), data.get("event_chat")
+        if user and not user.is_bot:
+            db.touch_user(user.id, user.full_name, user.username)
+        if chat and chat.type in ("group", "supergroup"):
+            db.touch_chat(chat.id, chat.title, chat.type)
+    except Exception:
+        log.exception("Statistikani yozib bo'lmadi")
+    return await handler(event, data)
 private = F.chat.type == "private"
 
 TIME_CHOICES = [10, 15, 20, 30, 45, 60, 120, 180, 300]
@@ -53,11 +67,12 @@ BTN_NEW = "➕ Yangi test"
 BTN_MY = "📚 Testlarim"
 BTN_TEMPLATES = "📄 Shablonlar"
 BTN_HELP = "❓ Yordam"
+BTN_STATS = "📊 Statistika"
 BTN_CANCEL = "❌ Bekor qilish"
 BTN_BACK = "⬅️ Orqaga"
 BTN_FINISH = "🏁 Tugatish"
 BTN_POLL = "📊 Tayyor oynada tuzish"
-NOT_MENU = ~F.text.startswith("/") & ~F.text.in_({BTN_NEW, BTN_MY, BTN_TEMPLATES, BTN_HELP, BTN_CANCEL, BTN_BACK, BTN_FINISH})
+NOT_MENU = ~F.text.startswith("/") & ~F.text.in_({BTN_NEW, BTN_MY, BTN_TEMPLATES, BTN_HELP, BTN_STATS, BTN_CANCEL, BTN_BACK, BTN_FINISH})
 MAIN_KB = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text=BTN_NEW), KeyboardButton(text=BTN_MY)],
@@ -65,6 +80,16 @@ MAIN_KB = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True,
 )
+OWNER_KB = ReplyKeyboardMarkup(
+    keyboard=MAIN_KB.keyboard + [[KeyboardButton(text=BTN_STATS)]],
+    resize_keyboard=True,
+)
+
+
+def main_kb(user_id: int) -> ReplyKeyboardMarkup:
+    return OWNER_KB if user_id in OWNER_IDS else MAIN_KB
+
+
 CANCEL_KB = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=BTN_CANCEL)]], resize_keyboard=True)
 
 HELP = """<b>Test boti</b>
@@ -173,7 +198,7 @@ async def start_deep(message: Message, command: CommandObject, state: FSMContext
         if quiz["owner_id"] != message.from_user.id:
             text, kb = await quiz_card(bot, quiz_id, for_group=True)
     if not group:
-        await message.answer("👋 Salom!", reply_markup=MAIN_KB)  # pastki menyu tugmalari
+        await message.answer("👋 Salom!", reply_markup=main_kb(message.from_user.id))  # pastki menyu tugmalari
     await message.answer(text, reply_markup=kb)
 
 
@@ -184,7 +209,7 @@ async def cmd_start(message: Message, state: FSMContext):
         return
     await state.clear()
     if can_create(message.from_user.id):
-        await message.answer(HELP, reply_markup=MAIN_KB)
+        await message.answer(HELP, reply_markup=main_kb(message.from_user.id))
     else:
         await message.answer("Salom! Testni yechish uchun sizga yuborilgan havolani oching.")
 
@@ -192,7 +217,7 @@ async def cmd_start(message: Message, state: FSMContext):
 @dp.message(private, Command("help", "yordam"))
 @dp.message(private, F.text == BTN_HELP)
 async def cmd_help(message: Message):
-    await message.answer(HELP, reply_markup=MAIN_KB if can_create(message.from_user.id) else None)
+    await message.answer(HELP, reply_markup=main_kb(message.from_user.id) if can_create(message.from_user.id) else None)
 
 
 @dp.message(private, Command("shablon"))
@@ -219,7 +244,7 @@ async def cmd_templates(message: Message):
 @dp.message(private, Command("bekor"))
 async def cmd_cancel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("Bekor qilindi.", reply_markup=MAIN_KB)
+    await message.answer("Bekor qilindi.", reply_markup=main_kb(message.from_user.id))
 
 
 # ---------- Yangi test ----------
@@ -325,7 +350,7 @@ async def on_file(message: Message, state: FSMContext, bot: Bot):
         lines += [escape(e) for e in errors[:15]]
         if len(errors) > 15:
             lines.append(f"... va yana {len(errors) - 15} ta")
-    await message.answer("\n".join(lines), reply_markup=MAIN_KB)
+    await message.answer("\n".join(lines), reply_markup=main_kb(message.from_user.id))
     await ask_all_time(message, state, quiz_id, 0, "n", edit=False)
 
 
@@ -487,7 +512,7 @@ async def manual_finish(message: Message, state: FSMContext):
     note = f"✅ {len(qs)} ta savol yozildi."
     if d.get("draft"):
         note += " Oxirgi chala savol qo'shilmadi."
-    await message.answer(note, reply_markup=MAIN_KB)
+    await message.answer(note, reply_markup=main_kb(message.from_user.id))
     text, kb = times_view(quiz_id, 0, "n")
     await message.answer(text, reply_markup=kb)
 
@@ -681,7 +706,7 @@ def owned(call: CallbackQuery, quiz_id: int):
 async def cmd_my(message: Message):
     quizzes = db.user_quizzes(message.from_user.id)
     if not quizzes:
-        await message.answer("Sizda hali test yo'q. Pastdagi «➕ Yangi test» ni bosing.", reply_markup=MAIN_KB)
+        await message.answer("Sizda hali test yo'q. Pastdagi «➕ Yangi test» ni bosing.", reply_markup=main_kb(message.from_user.id))
         return
     buttons = [
         [InlineKeyboardButton(text=f"📝 {q['title'][:40]} ({q['n']})", callback_data=f"card:{q['id']}")]
@@ -743,7 +768,7 @@ async def rename_quiz(message: Message, state: FSMContext, bot: Bot):
     quiz_id = (await state.get_data())["quiz_id"]
     await state.clear()
     db.update_quiz(quiz_id, title=" ".join(message.text.split())[:120])
-    await message.answer("✅ Nomi o'zgartirildi.", reply_markup=MAIN_KB)
+    await message.answer("✅ Nomi o'zgartirildi.", reply_markup=main_kb(message.from_user.id))
     text, kb = await quiz_card(bot, quiz_id)
     await message.answer(text, reply_markup=kb)
 
@@ -1018,6 +1043,39 @@ async def stop_button(call: CallbackQuery, bot: Bot):
     except Exception:
         pass
     await msg.answer("⏹ Test to'xtatildi. Natijalar chiqarilmoqda...")
+
+
+# ---------- Statistika ----------
+
+@dp.message(private, Command("stat"))
+@dp.message(private, F.text == BTN_STATS)
+@dp.message(private, F.text.lower() == "statistika")
+async def cmd_stats(message: Message):
+    uid = message.from_user.id
+    if uid not in OWNER_IDS:
+        await message.answer(
+            f"📊 Statistikani faqat bot egasi ko'radi.\n\nSizning Telegram ID raqamingiz: <code>{uid}</code>\n"
+            "Bot egasi bo'lsangiz, serverdagi <code>.env</code> faylga <code>OWNER_IDS=" + str(uid) + "</code> deb yozib, botni qayta ishga tushiring."
+        )
+        return
+    s = db.stats()
+    lines = [
+        "📊 <b>Statistika</b>",
+        "",
+        f"👥 Jami foydalanuvchilar: <b>{s['users']}</b>",
+        f"• oxirgi 24 soatda: {s['today']}",
+        f"• oxirgi 7 kunda: {s['week']}",
+        f"• oxirgi 30 kunda: {s['month']}",
+        f"• shu hafta yangi qo'shilgan: {s['new_week']}",
+        "",
+        f"📝 Testlar: <b>{s['quizzes']}</b> ta ({s['questions']} ta savol), {s['creators']} kishi yaratgan",
+        f"✅ Test yechilgan: <b>{s['solved']}</b> marta, {s['solvers']} kishi",
+        f"👥 Bot ishlatilgan guruhlar: <b>{s['groups']}</b>",
+    ]
+    if s["top"]:
+        lines += ["", "🏆 <b>Eng ko'p yechilgan testlar</b>"]
+        lines += [f"{i}. {escape(r['title'][:50])} — {r['n']} marta" for i, r in enumerate(s["top"], 1)]
+    await message.answer("\n".join(lines), reply_markup=main_kb(uid))
 
 
 # ---------- Ishga tushirish ----------
